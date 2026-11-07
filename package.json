@@ -1,0 +1,38 @@
+{
+  "name": "packflow-erp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "verify:phase6": "tsx scripts/verify-phase6.ts"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "7.0.1",
+    "@radix-ui/react-dialog": "1.1.23",
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.118.0",
+    "clsx": "2.1.1",
+    "exceljs": "4.4.0",
+    "jspdf": "4.2.1",
+    "jspdf-autotable": "5.0.9",
+    "lucide-react": "1.66.0",
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-hook-form": "7.91.0",
+    "recharts": "3.10.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
