@@ -11,6 +11,21 @@ Inventory operations for export packing materials, built with Next.js and Supaba
 
 The project uses Supabase Auth, Postgres and Storage. Database and storage migration scripts are in the repository root. Apply them in phase order to a new Supabase project; the live project's data is not included in this repository.
 
+## Deploy on Hostinger
+
+Use a Hostinger plan that supports Node.js applications and connect this repository as the application source. This is a Next.js server application, so deploy it as a Node.js app rather than a static website.
+
+In the Hostinger application's **environment variables**, set both values from your local `.env.local` file:
+
+| Name | Value |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Your Supabase publishable key |
+
+Set these variables **before the production build**. Hostinger installs dependencies from `package.json` and the committed `package-lock.json`, then builds the app. If either `NEXT_PUBLIC_` value changes, run a new build so the browser bundle receives the updated value. Do not upload `.env.local`, `.next/` or `node_modules/` to GitHub or the deployment archive.
+
+After the site has a final HTTPS domain, add that domain to the Supabase Auth site URL and redirect allow list. Then verify sign-in, a material list read, and a report export on the deployed site.
+
 ## Checks
 
 - `npm run typecheck`
