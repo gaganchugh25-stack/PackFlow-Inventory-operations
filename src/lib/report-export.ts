@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { readFile } from 'node:fs/promises';
@@ -17,32 +17,44 @@ function value(row:ReportRow,column:ReportColumn):string|number{
 function generatedIst(date:Date){return date.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'short'});}
 
 export async function excelBuffer(report:ReportResult,filters:ReportFilters,key:ReportKey,data:ReportData,generated:Date):Promise<Buffer>{
-  const workbook=new ExcelJS.Workbook();workbook.creator='PackFlow ERP';workbook.created=generated;
-  const sheet=workbook.addWorksheet('Report',{views:[{state:'frozen',ySplit:6}]});
+  const escapeXml=(input:string)=>input.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c] as string));
+  const columnName=(index:number)=>{let name='';for(let n=index;n>0;n=Math.floor((n-1)/26))name=String.fromCharCode(65+(n-1)%26)+name;return name;};
   const last=Math.max(1,report.columns.length);
-  sheet.mergeCells(1,1,1,last);sheet.getCell(1,1).value='PackFlow ERP';
-  sheet.mergeCells(2,1,2,last);sheet.getCell(2,1).value=report.title;
-  sheet.mergeCells(3,1,3,last);sheet.getCell(3,1).value=`Generated: ${generatedIst(generated)} IST  |  Rows: ${report.rows.length}`;
-  sheet.mergeCells(4,1,4,last);sheet.getCell(4,1).value=filterSummary(filters,data,key);
-  sheet.mergeCells(5,1,5,last);sheet.getCell(5,1).value=report.note;
-  for(const n of [1,2]){const cell=sheet.getCell(n,1);cell.font={name:'Aptos',bold:true,size:n===1?15:13,color:{argb:'FF172B3A'}};}
-  for(const n of [3,4,5]){sheet.getCell(n,1).font={name:'Aptos',size:10,color:{argb:'FF5D7180'}};}
-  sheet.getRow(6).values=report.columns.map(c=>c.label);
-  sheet.getRow(6).height=27;
-  sheet.getRow(6).eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF176B91'}};cell.font={name:'Aptos',bold:true,color:{argb:'FFFFFFFF'}};cell.alignment={vertical:'middle',wrapText:true};});
-  report.columns.forEach((column,index)=>{sheet.getColumn(index+1).width=Math.min(48,Math.max(14,column.key==='specification'?44:column.label.length+5));});
-  for(const row of report.rows){
-    const excelRow=sheet.addRow(report.columns.map(column=>value(row,column)));
-    excelRow.eachCell((cell,index)=>{
-      const column=report.columns[index-1];cell.alignment={vertical:'top',wrapText:column.key==='specification'||column.key==='reason'};
-      if(column.kind==='number'&&typeof cell.value==='number')cell.numFmt='#,##0.###';
-      if(column.kind==='text'||column.key==='item_code'||column.key==='reference'||column.key==='order')cell.numFmt='@';
-    });
-    if(excelRow.number%2===0)excelRow.eachCell(cell=>{cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF3F7F9'}};});
-  }
-  sheet.autoFilter={from:{row:6,column:1},to:{row:Math.max(6,report.rows.length+6),column:last}};
-  const buffer=await workbook.xlsx.writeBuffer();
-  return Buffer.from(buffer);
+  const cell=(row:number,column:number,item:string|number,style:number)=>{
+    const ref=`${columnName(column)}${row}`;
+    return typeof item==='number'&&Number.isFinite(item)
+      ?`<c r="${ref}" s="${style}"><v>${item}</v></c>`
+      :`<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(String(item))}</t></is></c>`;
+  };
+  const metadata=[
+    'PackFlow ERP',report.title,
+    `Generated: ${generatedIst(generated)} IST  |  Rows: ${report.rows.length}`,
+    filterSummary(filters,data,key),report.note,
+  ];
+  const rows=metadata.map((item,index)=>`<row r="${index+1}">${cell(index+1,1,item,index<2?index+1:3)}</row>`);
+  rows.push(`<row r="6" ht="27" customHeight="1">${report.columns.map((column,index)=>cell(6,index+1,column.label,4)).join('')}</row>`);
+  report.rows.forEach((row,index)=>{
+    const rowNumber=index+7;
+    rows.push(`<row r="${rowNumber}">${report.columns.map((column,columnIndex)=>{
+      const item=value(row,column);
+      const alternate=rowNumber%2===0;
+      const style=typeof item==='number'&&column.kind==='number'?(alternate?8:5):
+        (column.key==='specification'||column.key==='reason')?(alternate?9:6):(alternate?10:7);
+      return cell(rowNumber,columnIndex+1,item,style);
+    }).join('')}</row>`);
+  });
+  const widths=report.columns.map((column,index)=>`<col min="${index+1}" max="${index+1}" width="${Math.min(48,Math.max(14,column.key==='specification'?44:column.label.length+5))}" customWidth="1"/>`).join('');
+  const merges=metadata.map((_,index)=>`<mergeCell ref="A${index+1}:${columnName(last)}${index+1}"/>`).join('');
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${widths}</cols><sheetData>${rows.join('')}</sheetData><autoFilter ref="A6:${columnName(last)}${Math.max(6,report.rows.length+6)}"/><mergeCells count="5">${merges}</mergeCells></worksheet>`;
+  const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.###"/></numFmts><fonts count="5"><font><name val="Aptos"/><sz val="11"/></font><font><name val="Aptos"/><sz val="15"/><b/><color rgb="FF172B3A"/></font><font><name val="Aptos"/><sz val="13"/><b/><color rgb="FF172B3A"/></font><font><name val="Aptos"/><sz val="10"/><color rgb="FF5D7180"/></font><font><name val="Aptos"/><sz val="11"/><b/><color rgb="FFFFFFFF"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF176B91"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF3F7F9"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="11"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="4" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="164" fontId="0" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/><xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="49" fontId="0" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/></cellXfs></styleSheet>`;
+  const zip=new JSZip();
+  zip.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
+  zip.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+  zip.file('xl/workbook.xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Report" sheetId="1" r:id="rId1"/></sheets></workbook>');
+  zip.file('xl/_rels/workbook.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  zip.file('xl/styles.xml',styles);
+  zip.file('xl/worksheets/sheet1.xml',sheet);
+  return zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
 }
 
 export async function pdfBuffer(report:ReportResult,filters:ReportFilters,key:ReportKey,data:ReportData,generated:Date):Promise<Buffer>{
